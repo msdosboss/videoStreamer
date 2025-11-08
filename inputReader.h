@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+enum CoderState { ENCODER, DECODER };
+
 typedef struct {
   AVFormatContext *fmtCtx;
   int audioIndex;

@@ -56,13 +56,19 @@ AVFrame *createFrame(AVHandle *fmtHandle, int downScaleFactor){
 }
 
 
-AVCodecContext *createCodecContext(AVHandle *fmtHandle){
-    const AVCodec *decoder = avcodec_find_decoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
-    if(decoder == NULL){
+AVCodecContext *createCodecContext(AVHandle *fmtHandle, enum CoderState coderState){
+    const AVCodec *coder;
+    if(coderState == DECODER){
+        coder = avcodec_find_decoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
+    }
+    else{
+        coder = avcodec_find_encoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
+    }
+    if(coder == NULL){
         fprintf(stderr, "Decoder failed to init\n");
         return NULL;
     }
-    AVCodecContext *avCtx = avcodec_alloc_context3(decoder);
+    AVCodecContext *avCtx = avcodec_alloc_context3(coder);
     if(avCtx == NULL){
         fprintf(stderr, "Failed to alloc AVCodecContext\n");
         return NULL;
@@ -73,7 +79,7 @@ AVCodecContext *createCodecContext(AVHandle *fmtHandle){
         return NULL;
     }
 
-    if(avcodec_open2(avCtx, decoder, NULL) != 0){
+    if(avcodec_open2(avCtx, coder, NULL) != 0){
         fprintf(stderr, "avContext failed to init\n");
         return NULL;
     }
@@ -81,15 +87,17 @@ AVCodecContext *createCodecContext(AVHandle *fmtHandle){
 }
 
 
+
+
 //This function creates different resoultions of video from a single video
 int genMultiResolution(AVHandle *fmtHandle){
-    AVCodecContext *avCtx = createCodecContext(fmtHandle);
+    AVCodecContext *avCtx = createCodecContext(fmtHandle, DECODER);
     if(avCtx == NULL){
         fprintf(stderr, "avCtx failed to init");
         return 1;
     }
 
-    AVCodecContext *downScaleAvCtx = createCodecContext(fmtHandle);
+    AVCodecContext *downScaleAvCtx = createCodecContext(fmtHandle, ENCODER);
     if(downScaleAvCtx == NULL){
         fprintf(stderr, "avCtx failed to init");
         return 2;
