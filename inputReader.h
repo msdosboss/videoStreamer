@@ -8,6 +8,11 @@
 enum CoderState { ENCODER, DECODER };
 
 typedef struct {
+  AVCodecContext *decoder;
+  AVCodecContext *encoder;
+} CodecPair;
+
+typedef struct {
   AVFormatContext *fmtCtx;
   int audioIndex;
   int videoIndex;

@@ -56,34 +56,32 @@ AVFrame *createFrame(AVHandle *fmtHandle, int downScaleFactor){
 }
 
 
-AVCodecContext *createCodecContext(AVHandle *fmtHandle, enum CoderState coderState){
-    const AVCodec *coder;
-    if(coderState == DECODER){
-        coder = avcodec_find_decoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
-    }
-    else{
-        coder = avcodec_find_encoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
-    }
-    if(coder == NULL){
+int createCodecContext(AVHandle *fmtHandle, CodecPair *avCtxPair){
+    const AVCodec *decoder;
+    decoder = avcodec_find_decoder(fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->codec_id);
+    if(decoder == NULL){
         fprintf(stderr, "Decoder failed to init\n");
-        return NULL;
+        return 1;
     }
-    AVCodecContext *avCtx = avcodec_alloc_context3(coder);
-    if(avCtx == NULL){
+    avCtxPair->decoder = avcodec_alloc_context3(decoder);
+    if(avCtxPair->decoder == NULL){
         fprintf(stderr, "Failed to alloc AVCodecContext\n");
-        return NULL;
+        return 2;
     }
 
-    if(avcodec_parameters_to_context(avCtx, fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar) != 0){
+    if(avcodec_parameters_to_context(avCtxPair->decoder, fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar) != 0){
         fprintf(stderr, "Failed to copy codecpar to context\n");
-        return NULL;
+        return 3;
     }
 
-    if(avcodec_open2(avCtx, coder, NULL) != 0){
+    if(avcodec_open2(avCtxPair->decoder, decoder, NULL) != 0){
         fprintf(stderr, "avContext failed to init\n");
-        return NULL;
+        return 4;
     }
-    return avCtx;
+
+
+
+    return 0;
 }
 
 
@@ -91,28 +89,19 @@ AVCodecContext *createCodecContext(AVHandle *fmtHandle, enum CoderState coderSta
 
 //This function creates different resoultions of video from a single video
 int genMultiResolution(AVHandle *fmtHandle){
-    AVCodecContext *avCtx = createCodecContext(fmtHandle, DECODER);
-    if(avCtx == NULL){
-        fprintf(stderr, "avCtx failed to init");
-        return 1;
-    }
-
-    AVCodecContext *downScaleAvCtx = createCodecContext(fmtHandle, ENCODER);
-    if(downScaleAvCtx == NULL){
-        fprintf(stderr, "avCtx failed to init");
-        return 2;
-    }
+    CodecPair avCtxPair;
+    createCodecContext(fmtHandle, &avCtxPair);
 
     AVFrame *frame = createFrame(fmtHandle, 1);
     if(frame == NULL){
         fprintf(stderr, "frame failed to init\n");
-        return 3;
+        return 1;
     }
 
     AVFrame *downScaleFrame = createFrame(fmtHandle, 2);
     if(downScaleFrame == NULL){
         fprintf(stderr, "downScaleFrame failed to init\n");
-        return 4;
+        return 2;
     }
 
     int width = fmtHandle->fmtCtx->streams[fmtHandle->videoIndex]->codecpar->width;
@@ -124,11 +113,11 @@ int genMultiResolution(AVHandle *fmtHandle){
     AVPacket *downScalePkt = av_packet_alloc();
     while(av_read_frame(fmtHandle->fmtCtx, pkt) == 0){
         if(pkt->stream_index == fmtHandle->videoIndex){
-            if(avcodec_send_packet(avCtx, pkt) == 0){
-                while(avcodec_receive_frame(avCtx, frame) == 0){
+            if(avcodec_send_packet(avCtxPair.decoder, pkt) == 0){
+                while(avcodec_receive_frame(avCtxPair.decoder, frame) == 0){
                     sws_scale(swsCtx, (uint8_t const* const*)frame->data, frame->linesize, 0, frame->height, downScaleFrame->data, downScaleFrame->linesize);
-                    avcodec_send_frame(downScaleAvCtx, downScaleFrame);
-                    avcodec_receive_packet(downScaleAvCtx, downScalePkt);
+                    avcodec_send_frame(avCtxPair.encoder, downScaleFrame);
+                    avcodec_receive_packet(avCtxPair.encoder, downScalePkt);
                 }
             }
         }
@@ -138,7 +127,8 @@ int genMultiResolution(AVHandle *fmtHandle){
     av_packet_unref(pkt);
     av_frame_free(&frame);
     av_frame_free(&downScaleFrame);
-    avcodec_free_context(&avCtx);
+    avcodec_free_context(&avCtxPair.decoder);
+    avcodec_free_context(&avCtxPair.encoder);
 
     return 0;
 }
