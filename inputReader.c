@@ -79,12 +79,36 @@ int createCodecContext(AVHandle *fmtHandle, CodecPair *avCtxPair){
         return 4;
     }
 
+    const AVCodec *encoder = NULL;
+    encoder = avcodec_find_encoder(AV_CODEC_ID_H264);
+    //AAC if audio
+    //encoder = avcodec_find_encoder(AV_CODEC_ID_AAC);
 
+    if(encoder == NULL){
+        fprintf(stderr, "Encoder failed to init\n");
+        return 5;
+    }
+
+    avCtxPair->encoder = avcodec_alloc_context3(encoder);
+
+    if(avCtxPair->encoder == NULL){
+        fprintf(stderr, "Failed to alloc encoder");
+        return 6;
+    }
+
+    avCtxPair->encoder->width = avCtxPair->decoder->width / 2;
+    avCtxPair->encoder->height = avCtxPair->decoder->height / 2;
+    avCtxPair->encoder->pix_fmt = avCtxPair->decoder->pix_fmt;
+    avCtxPair->encoder->framerate = avCtxPair->decoder->framerate;
+    avCtxPair->encoder->time_base = av_inv_q(avCtxPair->decoder->framerate);
+
+    if(avcodec_open2(avCtxPair->encoder, encoder, NULL) < 0){
+        fprintf(stderr, "Failed to open encoder\n");
+        return 7;
+    }
 
     return 0;
 }
-
-
 
 
 //This function creates different resoultions of video from a single video
@@ -115,7 +139,12 @@ int genMultiResolution(AVHandle *fmtHandle){
         if(pkt->stream_index == fmtHandle->videoIndex){
             if(avcodec_send_packet(avCtxPair.decoder, pkt) == 0){
                 while(avcodec_receive_frame(avCtxPair.decoder, frame) == 0){
-                    sws_scale(swsCtx, (uint8_t const* const*)frame->data, frame->linesize, 0, frame->height, downScaleFrame->data, downScaleFrame->linesize);
+                    sws_scale(swsCtx,
+                            (uint8_t const* const*)frame->data,
+                            frame->linesize, 0, frame->height,
+                            downScaleFrame->data,
+                            downScaleFrame->linesize);
+                    downScaleFrame->pts = frame->pts;
                     avcodec_send_frame(avCtxPair.encoder, downScaleFrame);
                     avcodec_receive_packet(avCtxPair.encoder, downScalePkt);
                 }
