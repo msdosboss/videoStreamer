@@ -111,10 +111,50 @@ int createCodecContext(AVHandle *fmtHandle, CodecPair *avCtxPair){
 }
 
 
+AVFormatContext *createOutputContext(const char *filename, AVCodecContext *encoderCtx, AVStream **outStream){
+    AVFormatContext *outFmtCtx = NULL;
+
+    if(avformat_alloc_output_context2(&outFmtCtx, NULL, NULL, filename) != 0){
+        fprintf(stderr, "Failed to alloc output context\n");
+        return NULL;
+    }
+
+    *outStream = avformat_new_stream(outFmtCtx, NULL);
+    if(*outStream == NULL){
+        fprintf(stderr, "Failed to create output stream\n");
+        return NULL;
+    }
+    if(avcodec_parameters_from_context((*outStream)->codecpar, encoderCtx) != 0){
+        fprintf(stderr, "Failed to copy encoder parameters\n");
+        return NULL;
+    }
+
+    (*outStream)->time_base = encoderCtx->time_base;
+
+    //open the output file
+    if((outFmtCtx->oformat->flags & AVFMT_NOFILE) == 0){
+        if(avio_open(&(outFmtCtx->pb), filename, AVIO_FLAG_WRITE) != 0){
+            fprintf(stderr, "Failed to open output file\n");
+            return NULL;
+        }
+    }
+
+    if(avformat_write_header(outFmtCtx, NULL) != 0){
+        fprintf(stderr, "Failed to write header\n");
+        return NULL;
+    }
+
+    return outFmtCtx;
+}
+
+
 //This function creates different resoultions of video from a single video
 int genMultiResolution(AVHandle *fmtHandle){
     CodecPair avCtxPair;
     createCodecContext(fmtHandle, &avCtxPair);
+
+    AVStream *downScaleStream;
+    AVFormatContext *downScaleFmtCtx = createOutputContext("orca.mp4", avCtxPair.encoder, &downScaleStream);
 
     AVFrame *frame = createFrame(fmtHandle, 1);
     if(frame == NULL){
@@ -146,12 +186,33 @@ int genMultiResolution(AVHandle *fmtHandle){
                             downScaleFrame->linesize);
                     downScaleFrame->pts = frame->pts;
                     avcodec_send_frame(avCtxPair.encoder, downScaleFrame);
-                    avcodec_receive_packet(avCtxPair.encoder, downScalePkt);
+                    while(avcodec_receive_packet(avCtxPair.encoder, downScalePkt) == 0){
+                        //rescale timestamps
+                        av_packet_rescale_ts(downScalePkt, avCtxPair.encoder->time_base, downScaleStream->time_base);
+                        downScalePkt->stream_index = downScaleStream->index;
+                        av_interleaved_write_frame(downScaleFmtCtx, downScalePkt);
+                        av_packet_unref(downScalePkt);
+                    }
                 }
             }
         }
         av_packet_unref(pkt);
     }
+
+    //Flush encoder
+    avcodec_send_frame(avCtxPair.encoder, NULL);
+    while (avcodec_receive_packet(avCtxPair.encoder, downScalePkt) == 0) {
+        av_packet_rescale_ts(downScalePkt,
+                             avCtxPair.encoder->time_base,
+                             downScaleStream->time_base);
+        downScalePkt->stream_index = downScaleStream->index;
+        av_interleaved_write_frame(downScaleFmtCtx, downScalePkt);
+        av_packet_unref(downScalePkt);
+    }
+
+    av_write_trailer(downScaleFmtCtx);
+    avio_closep(&(downScaleFmtCtx->pb));
+    avformat_free_context(downScaleFmtCtx);
 
     av_packet_unref(pkt);
     av_frame_free(&frame);
